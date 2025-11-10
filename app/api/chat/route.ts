@@ -48,16 +48,71 @@ export async function POST(req: Request) {
         selectedModel = googleProvider(model || 'gemini-1.5-pro');
         break;
       case 'siliconflow':
-        // 使用硅基流动的OpenAI兼容API
-        // 注意：硅基流动使用的是 v1 版本的 API
-        const siliconflow = createOpenAI({
-          apiKey,
-          baseURL: 'https://api.siliconflow.cn/v1',
+        // 硅基流动不兼容AI SDK v5的/responses端点
+        // 需要使用AI SDK v4或直接调用chat/completions
+        // 这里使用临时方案：直接调用chat/completions并返回结果
+        console.log('SiliconFlow: Direct API call to chat/completions');
+
+        // 构建消息
+        const siliconflowMessages = enhancedMessages.map((msg: any) => ({
+          role: msg.role,
+          content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+        }));
+
+        // 直接调用硅基流动API
+        const siliconflowResponse = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: model || 'Qwen/Qwen2.5-72B-Instruct',
+            messages: siliconflowMessages,
+            temperature: 0,
+          }),
         });
-        // 确保使用支持的模型
-        selectedModel = siliconflow(model || 'Qwen/Qwen2.5-72B-Instruct');
-        console.log('Using SiliconFlow model:', model || 'Qwen/Qwen2.5-72B-Instruct');
-        break;
+
+        if (!siliconflowResponse.ok) {
+          const errorData = await siliconflowResponse.json();
+          console.error('SiliconFlow API error:', errorData);
+          return Response.json(
+            { error: `SiliconFlow API错误: ${errorData.error?.message || siliconflowResponse.statusText}` },
+            { status: siliconflowResponse.status }
+          );
+        }
+
+        const result = await siliconflowResponse.json();
+        const content = result.choices?.[0]?.message?.content || '';
+
+        // 提取工具调用（简化版）
+        const toolCallMatch = content.match(/```xml\s*([\s\S]*?)\s*```/);
+        if (toolCallMatch) {
+          const xml = toolCallMatch[1];
+          return new Response(
+            `data: ${JSON.stringify({ type: 'text', text: xml, tool: 'display_diagram' })}\n\n` +
+            `data: [DONE]\n\n`,
+            {
+              headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+              },
+            }
+          );
+        }
+
+        return new Response(
+          `data: ${JSON.stringify({ type: 'text', text: content })}\n\n` +
+          `data: [DONE]\n\n`,
+          {
+            headers: {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+              'Connection': 'keep-alive',
+            },
+          }
+        );
       default:
         return Response.json(
           { error: '不支持的 AI 提供商' },
