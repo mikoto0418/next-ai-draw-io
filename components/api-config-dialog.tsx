@@ -98,6 +98,13 @@ export function ApiConfigDialog() {
     if (savedConfig) {
       try {
         const parsed = JSON.parse(savedConfig);
+        // 确保模型字段存在
+        if (!parsed.model) {
+          const provider = providers.find(p => p.id === parsed.provider);
+          if (provider) {
+            parsed.model = provider.defaultModel;
+          }
+        }
         setConfig(parsed);
       } catch (error) {
         console.error("Failed to parse saved config:", error);
